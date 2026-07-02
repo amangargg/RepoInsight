@@ -1,0 +1,97 @@
+import time
+import hashlib
+import re
+import google.generativeai as genai
+from typing import List
+from langchain_core.embeddings import Embeddings
+from app.core.config import settings
+
+class GeminiRESTEmbeddings(Embeddings):
+    """Custom LangChain-compatible embeddings class that calls Google Gemini
+    via the REST-based google-generativeai SDK, completely bypassing gRPC."""
+
+    def __init__(self, api_key: str, model: str = "models/gemini-embedding-001"):
+        self.model = model
+        genai.configure(api_key=api_key)
+
+    def _embed_with_retry(self, text: str, max_retries: int = 3) -> List[float]:
+        """Embed a single text with retry logic."""
+        for attempt in range(max_retries):
+            try:
+                result = genai.embed_content(
+                    model=self.model,
+                    content=text,
+                    task_type="retrieval_document"
+                )
+                return result["embedding"]
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    print(f"  Embedding retry {attempt + 1}/{max_retries} after error: {e}")
+                    time.sleep(wait_time)
+                else:
+                    raise
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """Embed a list of documents one by one via REST API."""
+        embeddings = []
+        for text in texts:
+            embedding = self._embed_with_retry(text)
+            embeddings.append(embedding)
+        return embeddings
+
+    def embed_query(self, text: str) -> List[float]:
+        """Embed a single query via REST API."""
+        result = genai.embed_content(
+            model=self.model,
+            content=text,
+            task_type="retrieval_query"
+        )
+        return result["embedding"]
+
+
+class LocalHashEmbeddings(Embeddings):
+    """Offline embeddings that keep ingest/search working without API quota.
+    
+    Uses a deterministic bag-of-tokens hashing approach.
+    """
+
+    def __init__(self, dimensions: int = 384):
+        self.dimensions = dimensions
+
+    def _embed(self, text: str) -> List[float]:
+        vector = [0.0] * self.dimensions
+        tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*|/[A-Za-z0-9_./-]+", text.lower())
+
+        for token in tokens:
+            digest = hashlib.md5(token.encode("utf-8")).digest()
+            index = int.from_bytes(digest[:4], "big") % self.dimensions
+            sign = 1.0 if digest[4] % 2 == 0 else -1.0
+            vector[index] += sign
+
+        norm = sum(value * value for value in vector) ** 0.5
+        if norm:
+            vector = [value / norm for value in vector]
+        return vector
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return [self._embed(text) for text in texts]
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._embed(text)
+
+
+def get_embeddings_provider():
+    """Factory function returning the configured embeddings provider."""
+    provider = settings.EMBEDDING_PROVIDER.lower()
+    api_key = settings.GEMINI_API_KEY
+
+    if provider == "gemini" and api_key and api_key != "your_gemini_api_key_here":
+        print("Using Google Gemini REST Embeddings.")
+        return GeminiRESTEmbeddings(
+            api_key=api_key,
+            model=settings.GEMINI_EMBEDDING_MODEL
+        )
+    
+    print("Using Local Bag-of-Tokens Hash Embeddings (Offline Mode).")
+    return LocalHashEmbeddings()

@@ -1,0 +1,23 @@
+# Python virtual environment and caches
+backend/venv/
+backend/__pycache__/
+backend/app/tests/.pytest_cache/
+.pytest_cache/
+*.pyc
+
+# Local ingestion storage
+backend/repositories/
+backend/chroma_db/
+backend/repo_insight.db
+backend/app/database/repo_insight.db
+
+# Node dependencies and Next.js builds
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# System files & environment configs
+.DS_Store
+.env
+backend/.env
+frontend/.env.local
