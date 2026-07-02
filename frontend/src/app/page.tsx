@@ -28,6 +28,7 @@ interface FileInfo {
   path: string;
   lines: number;
   language: string;
+  imports?: string[];
 }
 
 interface ApiEndpoint {
