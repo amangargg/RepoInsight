@@ -80,6 +80,9 @@ class VectorStoreManager:
                 self.chunk_and_index_file(db, rel_path, content, lang)
                 indexed += 1
                 print(f"  [{i+1}/{len(files_report)}] Indexed: {rel_path}")
+                if settings.EMBEDDING_PROVIDER.lower() == "gemini":
+                    import time
+                    time.sleep(0.25) # Throttle to prevent 429 Rate Limits
             except Exception as e:
                 skipped += 1
                 print(f"  [{i+1}/{len(files_report)}] Skipped: {rel_path} (Error: {e})")

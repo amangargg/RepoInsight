@@ -32,13 +32,43 @@ class GeminiRESTEmbeddings(Embeddings):
                 else:
                     raise
 
+    def _embed_batch_with_retry(self, texts: List[str], max_retries: int = 3) -> List[List[float]]:
+        """Embed a list of texts in a single batch call with retry logic."""
+        if not texts:
+            return []
+            
+        for attempt in range(max_retries):
+            try:
+                # If only one text is passed, optimize for it
+                if len(texts) == 1:
+                    return [self._embed_with_retry(texts[0])]
+                    
+                result = genai.embed_content(
+                    model=self.model,
+                    content=texts,
+                    task_type="retrieval_document"
+                )
+                
+                embeddings = result["embedding"]
+                if embeddings and isinstance(embeddings[0], dict):
+                    return [emb["values"] for emb in embeddings]
+                return embeddings
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_time = 3 ** attempt
+                    print(f"  Batch embedding retry {attempt + 1}/{max_retries} after error: {e}")
+                    time.sleep(wait_time)
+                else:
+                    print("  Batch embedding failed. Falling back to one-by-one embedding with rate throttling...")
+                    fallback_embeddings = []
+                    for text in texts:
+                        fallback_embeddings.append(self._embed_with_retry(text))
+                        time.sleep(0.5)  # 0.5 seconds sleep between requests to stay under 100 RPM
+                    return fallback_embeddings
+
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """Embed a list of documents one by one via REST API."""
-        embeddings = []
-        for text in texts:
-            embedding = self._embed_with_retry(text)
-            embeddings.append(embedding)
-        return embeddings
+        """Embed a list of documents in batches via REST API to minimize API rate limit hits."""
+        return self._embed_batch_with_retry(texts)
 
     def embed_query(self, text: str) -> List[float]:
         """Embed a single query via REST API."""
